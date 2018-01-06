@@ -99,3 +99,7 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# succ files
+succ-main.db
+succ-hydrus-export.db
