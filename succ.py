@@ -46,7 +46,7 @@ def main():
     succ = SuccMain()
     succ.init()
 
-    while succ._running:
+    while succ.is_running():
         try:
             line = input('[succ]> ')
         except (EOFError, KeyboardInterrupt):
@@ -60,7 +60,7 @@ def main():
             log.exception('error while processing command')
 
     # keep a clean shutdown when needed
-    if succ._running:
+    if succ.is_running():
         succ.shutdown(0)
 
 if __name__ == '__main__':

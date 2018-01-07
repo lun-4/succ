@@ -21,10 +21,28 @@ class SuccMain:
     """
     def __init__(self):
         log.info('connecting to db')
+        self._running = False
         self.db = sqlite3.connect('succ.db')
+
+        self.db.execute("""
+        CREATE TABLE IF NOT EXISTS files (
+            hash text PRIMARY KEY
+        )
+        """)
+        
+        self.db.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            hash text,
+            tag text,
+            PRIMARY KEY (hash, tag)
+        )
+        """)
 
         self.loop = asyncio.get_event_loop()
         self.loop.run_until_complete(self.async_init())
+
+    def is_running(self) -> bool:
+        return self._running
 
     async def async_init(self):
         self.session = aiohttp.ClientSession()
@@ -53,6 +71,7 @@ class SuccMain:
             return
 
         # shutdown jobs here.
+        self.db.commit()
         self.session.close()
 
         log.info(f'exiting with code {code}')
@@ -64,10 +83,12 @@ class SuccMain:
         print('things are working!')
 
     def c_exit(self, args):
+        """Exit the client."""
         try:
             status = int(args[1])
         except:
             status = 0
+
         raise ShutdownClient(status)
 
     def c_fetch_latest(self, args):
