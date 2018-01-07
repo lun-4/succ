@@ -1,6 +1,8 @@
 #!/usr/bin/env python3.6
 
 import logging
+import readline
+
 from succ import SuccMain
 
 __doc__ = """
