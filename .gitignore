@@ -103,4 +103,5 @@ ENV/
 # succ files
 succ.db
 succ-hydrus-export.db
+succ-archive.db
 
