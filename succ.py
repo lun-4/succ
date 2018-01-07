@@ -41,31 +41,27 @@ log = logging.getLogger(__name__)
 
 
 def main():
+    """Main entrypoint."""
     log.debug('initializing succ')
     succ = SuccMain()
     succ.init()
 
-    while True:
+    while succ._running:
         try:
-            line = input('> ')
-        except EOFError:
+            line = input('[succ]> ')
+        except (EOFError, KeyboardInterrupt):
             log.info('leaving')
             succ.shutdown(0)
             break
 
         try:
             succ.process_line(line)
-        except:
+        except Exception:
             log.exception('error while processing command')
 
-    succ.shutdown(0)
+    # keep a clean shutdown when needed
+    if succ._running:
+        succ.shutdown(0)
 
 if __name__ == '__main__':
     main()
-    """
-    hta = HydrusTagArchive.HydrusTagArchive('succ.db')
-    hta.SetHashType(HydrusTagArchive.HASH_TYPE_MD5)
-    print(hta)
-    del hta
-    """
-
