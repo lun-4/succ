@@ -1,6 +1,10 @@
-#!/usr/bin/env python3
-MAIN_DESC = """
-succ - a hypnohub api scraper
+#!/usr/bin/env python3.6
+
+import logging
+from succ import SuccMain
+
+__doc__ = """
+a hypnohub api scraper
 
 this calls the api a lot of times
 in a sane matter, saving anything it can
@@ -31,23 +35,30 @@ tag archive, so you can have your tagged porn
 ⠀⠉⠉⠁⠀⠀⠀⠀⢸⣿⣿⠁
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈
 """
-import logging
-import argparse
-
-import HydrusTagArchive
 
 logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser(description=MAIN_DESC)
-parser.add_argument('mode', type=str,
-                    help='which mode to act as')
-parser.add_argument('--db', default='mainsucc.db',
-                    help='which db file to use to store main succ data')
 
 def main():
-    args = parser.parse_args()
-    print(args.mode)
-    print(args.db)
+    log.debug('initializing succ')
+    succ = SuccMain()
+    succ.init()
+
+    while True:
+        try:
+            line = input('> ')
+        except EOFError:
+            log.info('leaving')
+            succ.shutdown(0)
+            break
+
+        try:
+            succ.process_line(line)
+        except:
+            log.exception('error while processing command')
+
+    succ.shutdown(0)
 
 if __name__ == '__main__':
     main()
