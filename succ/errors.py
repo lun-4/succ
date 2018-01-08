@@ -6,3 +6,7 @@ class HHApiError(Exception):
 class ShutdownClient(Exception):
     """Client wants to shutdown."""
     pass
+
+
+class NetworkError(Exception):
+    pass

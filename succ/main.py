@@ -3,7 +3,7 @@ import asyncio
 import sqlite3
 import sys
 import time
-import json
+import copy
 
 import aiohttp
 
@@ -28,6 +28,7 @@ class SuccMain:
         log.info('connecting to db')
         self._running = False
         self.db = sqlite3.connect('succ.db')
+        self.cache = {}
 
         # create hydrus tag archive very early
         self.hta = HydrusTagArchive('succ-archive.db')
@@ -63,13 +64,9 @@ class SuccMain:
         log.info('initializing')
 
         self.db.executescript("""
-        CREATE TABLE IF NOT EXISTS logs (
-            logline text
-        );
-
-        CREATE TABLE IF NOT EXISTS jobs (
-            id text primary key,
-            data text
+        CREATE TABLE IF NOT EXISTS uploaders (
+            author text,
+            tag text,
         );
         """)
 
@@ -111,12 +108,73 @@ class SuccMain:
                                              f'={page}&limit=200'))
 
         posts = []
+        cur = self.db.cursor()
         for rawpost in res:
             post = Post(rawpost)
 
-            # namespace tags
+            # process namespaces
             post.tags.append(f'md5:{post.hash}')
             post.tags.append(f'id:{post.id}')
+
+            for tag in copy.copy(post.tags):
+                if '_(manipper)' in tag:
+                    log.debug('got manipper [from hard manipper]')
+                    post.tags.append(f'creator:{tag}')
+                    post.tags.append(f'manipper:{tag}')
+                elif '_(artist)' in tag:
+                    log.debug('got artist [from hard artist]')
+                    post.tags.append(f'creator:{tag}')
+                elif post.author.lower() in tag:
+                    log.debug('got artist [match]')
+                    post.tags.append(f'creator:{tag}')
+
+            # second pass, this time we checkin for any creator:
+            # if none is found, we try to search
+            # something using post.author, then slapping creator: on top
+            good = False
+            for tag in post.tags:
+                if 'creator:' in tag:
+                    good = True
+                    break
+
+            if not good:
+                author = post.author.lower()
+                cur.execute("SELECT tag FROM uploaders WHERE author=?",
+                            (author,))
+
+                tag = cur.fetchone()
+                try:
+                    tag = tag[0]
+                except TypeError:
+                    tag = 'none'
+
+                if not tag:
+                    log.debug(f'ignoring {author!r} as it wouldnt work')
+                elif tag != 'none':
+                    log.debug(f'got {author!r} from db = {tag!r}')
+                    post.tags.append(tag)
+                else:
+                    # query hh to know about that uploader
+                    r = Route('GET', '/tag/index.json?name='
+                                     f'{author}&limit=1')
+
+                    tags = await self.hh_req(r)
+                    try:
+                        artist_tag = tags[0]["name"]
+                        tag = f'creator:{artist_tag}'
+                        log.debug(f'found {author!r} = {tag!r}')
+                        cur.execute('INSERT INTO uploaders (author, tag)'
+                                    'VALUES (?, ?)',
+                                    (author, tag))
+                        post.tags.append(tag)
+                    except IndexError:
+                        log.debug(f'not found {author!r}')
+                        cur.execute('INSERT INTO uploaders (author, tag) '
+                                    'VALUES (?, NULL)',
+                                    (author,))
+
+                    log.debug('commiting')
+                    self.db.commit()
 
             posts.append(post)
 
@@ -184,7 +242,7 @@ class SuccMain:
 
             self.process_hta(data, f'pages: {i} - {i + page_continue}')
             i += page_continue + 1
-            time.sleep(0.5)
+            time.sleep(2)
 
     def process_line(self, line):
         """Process a line as a command"""
