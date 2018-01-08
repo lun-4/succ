@@ -66,7 +66,7 @@ class SuccMain:
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS uploaders (
             author text,
-            tag text,
+            tag text
         );
         """)
 
