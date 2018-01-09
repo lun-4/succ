@@ -103,18 +103,11 @@ class TagFetcher:
             if tag_name == self.tag:
                 return _wrap(tag_name, tag_type)
 
-        # we still didn't find anything, reiterate *ONCE MORE*
-        for tag_data in results:
-            tag_name = tag_data['name']
-            tag_type = tag_data['tag_type']
-
-            if self.tag in tag_name:
-                return _wrap(tag_name, tag_type)
-
-        # fucking hell, how did we get here?
         # this is like, when a tag is in hypnohub,
         # but the tag api doesn't give us anything
         # meaningful about it
+
+        # default: make it general.
         self.cur.execute('insert into tags (tag, type) values (?, ?)',
                          (self.tag, TagType.GENERAL))
         log.debug(f'{tag_name!r} was a no-match from API')

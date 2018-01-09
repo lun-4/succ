@@ -35,7 +35,7 @@ class SuccMain:
         self.hta.SetHashType(HASH_TYPE_MD5)
 
         self.loop = asyncio.get_event_loop()
-        self.tagfetch_semaphore = asyncio.Semaphore(4)
+        self.tagfetch_semaphore = asyncio.Semaphore(2)
         self.loop.run_until_complete(self.async_init())
 
     def is_running(self) -> bool:
