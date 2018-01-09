@@ -93,7 +93,7 @@ class TagFetcher:
                                  (tag_name, tag_type))
                 log.debug(f'learned {tag_name!r} => type {tag_type}')
             except sqlite3.IntegrityError:
-                log.debug(f'we already learned about {tag_name!r}!')
+                log.debug(f'we already learned {tag_name!r}! ({self.tag!r})')
 
         # reiterate again, to get our *actual tag* information
         for tag_data in results:
@@ -115,4 +115,7 @@ class TagFetcher:
         # this is like, when a tag is in hypnohub,
         # but the tag api doesn't give us anything
         # meaningful about it
-        return _wrap(self.tag, TagType.REVIEW)
+        self.cur.execute('insert into tags (tag, type) values (?, ?)',
+                         (self.tag, TagType.GENERAL))
+        log.debug(f'{tag_name!r} was a no-match from API')
+        return _wrap(self.tag, TagType.GENERAL)

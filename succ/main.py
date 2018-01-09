@@ -53,7 +53,7 @@ class SuccMain:
                                         f'{HH_API}{route.path}',
                                         json=payload) as res:
             if res.status != 200:
-                raise HHApiError('Error contacting the api')
+                raise HHApiError(f'Error contacting the api, {res.status}')
 
             return await res.json()
 
