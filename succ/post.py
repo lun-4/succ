@@ -52,8 +52,9 @@ class TagFetcher:
         self.result = None
 
     async def fetch(self) -> dict:
-        self.result = await self._fetch()
-        return self.result
+        async with self.succ.tagfech_semaphore:
+            self.result = await self._fetch()
+            return self.result
 
     async def _fetch(self) -> dict:
         """Fetcher function.
@@ -70,7 +71,7 @@ class TagFetcher:
         self.cur.execute('select type from tags where tag=?', (self.tag,))
         result = self.cur.fetchone()
         if result:
-            log.debug(f'got {self.tag} from cache')
+            log.debug(f'got {self.tag} from tag knowledge')
             return {
                 'name': self.tag,
                 'tag_type': result[0]
