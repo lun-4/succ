@@ -52,7 +52,7 @@ class TagFetcher:
         self.result = None
 
     async def fetch(self) -> dict:
-        async with self.succ.tagfech_semaphore:
+        async with self.succ.tagfetch_semaphore:
             self.result = await self._fetch()
             return self.result
 
