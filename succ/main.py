@@ -7,10 +7,10 @@ import copy
 
 import aiohttp
 
-from .consts import HH_API
+from .consts import HH_API, TagType, NAMESPACES
 from .errors import HHApiError, ShutdownClient
 from .http import Route
-from .post import Post
+from .post import Post, TagFetcher
 
 from .HydrusTagArchive import HydrusTagArchive, HASH_TYPE_MD5
 
@@ -35,6 +35,7 @@ class SuccMain:
         self.hta.SetHashType(HASH_TYPE_MD5)
 
         self.loop = asyncio.get_event_loop()
+        self.tagfetch_semaphore = asyncio.Semaphore(4)
         self.loop.run_until_complete(self.async_init())
 
     def is_running(self) -> bool:
@@ -64,10 +65,10 @@ class SuccMain:
         log.info('initializing')
 
         self.db.executescript("""
-        CREATE TABLE IF NOT EXISTS uploaders (
-            author text,
-            tag text
-        );
+        create table if not exists tags (
+            tag text primary key,
+            type int
+        )
         """)
 
         self._running = True
@@ -107,78 +108,56 @@ class SuccMain:
         res = await self.hh_req(Route('GET', '/post/index.json?page'
                                              f'={page}&limit=200'))
 
+        t_start = time.monotonic()
         posts = []
-        cur = self.db.cursor()
         for rawpost in res:
             post = Post(rawpost)
 
+            # lmfao
+            post.tag_add('hypnosis')
+            post.tag_add('booru:hypnohub')
+
             # process namespaces
-            post.tags.append(f'md5:{post.hash}')
-            post.tags.append(f'id:{post.id}')
+            post.tag_add(f'md5:{post.hash}')
+            post.tag_add(f'id:{post.id}')
 
-            for tag in copy.copy(post.tags):
-                if '_(manipper)' in tag:
-                    log.debug('got manipper [from hard manipper]')
-                    post.tags.append(f'creator:{tag}')
-                    post.tags.append(f'manipper:{tag}')
-                elif '_(artist)' in tag:
-                    log.debug('got artist [from hard artist]')
-                    post.tags.append(f'creator:{tag}')
-                elif post.author.lower() in tag:
-                    log.debug('got artist [match]')
-                    post.tags.append(f'creator:{tag}')
+            tag_fetchers = []
+            for tag in copy.copy(post.raw_tags):
+                tf = TagFetcher(self, self.db.cursor(), tag)
+                tag_fetchers.append(tf)
 
-            # second pass, this time we checkin for any creator:
-            # if none is found, we try to search
-            # something using post.author, then slapping creator: on top
-            good = False
-            for tag in post.tags:
-                if 'creator:' in tag:
-                    good = True
-                    break
+            # actually fetch the tags
+            log.debug(f'waiting for {len(tag_fetchers)} tag fetchers')
+            _coros = [tf.fetch() for tf in tag_fetchers]
+            done, pending = await asyncio.wait(_coros)
 
-            if not good:
-                author = post.author.lower()
-                cur.execute("SELECT tag FROM uploaders WHERE author=?",
-                            (author,))
-
-                tag = cur.fetchone()
-                try:
-                    tag = tag[0]
-                except TypeError:
-                    tag = 'none'
-
-                if not tag:
-                    log.debug(f'ignoring {author!r} as it wouldnt work')
-                elif tag != 'none':
-                    log.debug(f'got {author!r} from db = {tag!r}')
-                    post.tags.append(tag)
+            # we waited for everyone, now we can get our data.
+            # we can actually add it to the fucking post now.
+            for tagfetcher in tag_fetchers:
+                tag_data = tagfetcher.result
+                if not tag_data:
+                    log.warning(f'sorry, {tagfetcher.tag!r} is bad')
                 else:
-                    # query hh to know about that uploader
-                    r = Route('GET', '/tag/index.json?name='
-                                     f'{author}&limit=1')
+                    tag_name = tag_data['name']
+                    tag_type = tag_data['tag_type']
+                    namespace = NAMESPACES.get(tag_type)
+                    if namespace:
+                        post.tag_add(f'{namespace}{tag_name}')
 
-                    tags = await self.hh_req(r)
-                    try:
-                        artist_tag = tags[0]["name"]
-                        tag = f'creator:{artist_tag}'
-                        log.debug(f'found {author!r} = {tag!r}')
-                        cur.execute('INSERT INTO uploaders (author, tag)'
-                                    'VALUES (?, ?)',
-                                    (author, tag))
-                        post.tags.append(tag)
-                    except IndexError:
-                        log.debug(f'not found {author!r}')
-                        cur.execute('INSERT INTO uploaders (author, tag) '
-                                    'VALUES (?, NULL)',
-                                    (author,))
-
-                    log.debug('commiting')
-                    self.db.commit()
-
+            log.debug(f'post {post.id} with {len(post.tags)} tags')
             posts.append(post)
+            self.db.commit()
+        t_end = time.monotonic()
+        delta = round(t_end - t_start, 2)
 
-        log.info(f'got page {page}, {len(posts)} posts')
+        rawtagsum = sum(len(p.raw_tags) for p in posts)
+        tagsum = sum(len(p.tags) for p in posts)
+        log.info(f'[page {page}, count] {len(posts)} posts processed.')
+        log.info(f'[page {page}, fetch] before: {rawtagsum}, after: {tagsum}.')
+        log.info(f'[page {page}, time] took {delta} seconds.')
+
+        # sanity check
+        self.db.commit()
         return posts
 
     def fetch_pages(self, start: int, end: int) -> list:
@@ -213,7 +192,7 @@ class SuccMain:
 
         tend = time.monotonic()
         delta = round((tend - tstart) * 1000, 3)
-        log.info(f'took {delta}ms processing {len(posts)} posts [{listid}]')
+        log.info(f'[tagarchive:{listid}] {len(posts)} posts, {delta}ms')
 
     def c_fetch_latest(self, args):
         """fetch latest stuff from hypnohub"""
@@ -224,6 +203,36 @@ class SuccMain:
         start, end = int(args[1]), int(args[2])
         data = self.fetch_pages(start, end)
         self.process_hta(data, f'pages: {start} - {end}')
+
+    def c_fetch_until(self, args):
+        """Fetch from page 0 until a page
+        that contains the provided post ID.
+        """
+        page = 0
+        until_id = int(args[1])
+        final_posts = []
+        while True:
+            posts = self.loop.run_until_complete(self.fetch_page(page))
+            wanted = filter(lambda post: post.id >= until_id, posts)
+            unwanted = filter(lambda post: post.id < until_id, posts)
+
+            # expensive, but necessary
+            wanted = list(wanted)
+            unwanted = list(unwanted)
+
+            final_posts.extend(wanted)
+            # we might actually have a way to make this better
+            # like iterating once and checking
+            if unwanted:
+                print('we have unwanted posts, this is the last page.')
+                break
+
+            page += 1
+            print(f'continuing to page {page}')
+
+        print(f'got {len(final_posts)} posts, sending to tag archive')
+        first_id = final_posts[0].id
+        self.process_hta(final_posts, f'from {first_id} to {until_id}')
 
     def c_fetch_all(self, args):
         """fetch all from hypnohub. ALL."""
