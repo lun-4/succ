@@ -1,9 +1,14 @@
 import codecs
 import logging
 import sqlite3
+import random
+import asyncio
+
+import aiohttp
 
 from .http import Route
 from .consts import TagType
+from .errors import HHApiError
 
 log = logging.getLogger(__name__)
 
@@ -80,8 +85,14 @@ class TagFetcher:
         # we didn't get anything from cache, fuck the api
         # no limit, i want to fuck more
         r = Route('GET', '/tag/index.json?name='
-                         f'{self.tag}')
-        results = await self.succ.hh_req(r)
+                         f'{self.tag}&limit=0')
+        try:
+            results = await self.succ.hh_req(r)
+        except (aiohttp.ClientError, HHApiError) as err:
+            retry = round(random.uniform(0.5, 2.5), 3)
+            log.info(f'[tagfetch {self.tag}] {err!r}, retrying in {retry}s.')
+            await asyncio.sleep(retry)
+            return await self._fetch()
 
         # this is a list of tag information, insert for each!
         for tag_data in results:
@@ -111,5 +122,5 @@ class TagFetcher:
         # default: make it general.
         self.cur.execute('insert into tags (tag, type) values (?, ?)',
                          (self.tag, TagType.GENERAL))
-        log.debug(f'{tag_name!r} was a no-match from API')
+        log.debug(f'{self.tag!r} was a no-match from API')
         return _wrap(self.tag, TagType.GENERAL)

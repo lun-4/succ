@@ -4,10 +4,11 @@ import sqlite3
 import sys
 import time
 import copy
+import random
 
 import aiohttp
 
-from .consts import HH_API, TagType, NAMESPACES
+from .consts import HH_API, NAMESPACES
 from .errors import HHApiError, ShutdownClient
 from .http import Route
 from .post import Post, TagFetcher
@@ -55,6 +56,7 @@ class SuccMain:
             if res.status != 200:
                 raise HHApiError(f'Error contacting the api, {res.status}')
 
+            log.debug(f'Finished {route!r}')
             return await res.json()
 
     def init(self):
@@ -105,8 +107,14 @@ class SuccMain:
         self.db.commit()
 
     async def fetch_page(self, page: int) -> list:
-        res = await self.hh_req(Route('GET', '/post/index.json?page'
-                                             f'={page}&limit=200'))
+        try:
+            res = await self.hh_req(Route('GET', '/post/index.json?page'
+                                                 f'={page}&limit=200'))
+        except (aiohttp.ClientError, HHApiError) as err:
+            retry = round(random.uniform(0.5, 2.5), 2)
+            log.info(f'[pagefetch {page}] {err!r}, retrying in {retry}s')
+            await asyncio.sleep(retry)
+            return await self.fetch_page(page)
 
         t_start = time.monotonic()
         posts = []
@@ -130,6 +138,8 @@ class SuccMain:
             log.debug(f'waiting for {len(tag_fetchers)} tag fetchers')
             _coros = [tf.fetch() for tf in tag_fetchers]
             done, pending = await asyncio.wait(_coros)
+            if pending:
+                log.warning(f'we have {len(pending)} pending tasks')
 
             # we waited for everyone, now we can get our data.
             # we can actually add it to the fucking post now.
@@ -172,6 +182,9 @@ class SuccMain:
             coros.append(coro)
 
         done, pending = self.loop.run_until_complete(asyncio.wait(coros))
+        if pending:
+            log.warning(f'we have {len(pending)} pending tasks')
+
         for pagetask in done:
             data = pagetask.result()
             posts.extend(data)
@@ -237,7 +250,7 @@ class SuccMain:
     def c_fetch_all(self, args):
         """fetch all from hypnohub. ALL."""
         i = 0
-        page_continue = 4
+        page_continue = 3
         while True:
             try:
                 data = self.fetch_pages(i, i + page_continue)
