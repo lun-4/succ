@@ -48,7 +48,7 @@ class TagFetcher:
 
     This includes metadata information.
 
-    Fuck Hypnohub.
+    Fuck the Hypnohub API.
     """
     def __init__(self, succ, cur, tag):
         self.succ = succ
@@ -57,11 +57,14 @@ class TagFetcher:
         self.result = None
 
     async def fetch(self) -> dict:
+        """Fetcher function but obeying
+        the semaphore.
+        """
         async with self.succ.tagfetch_semaphore:
-            self.result = await self._fetch()
+            self.result = await self.fetch_tags()
             return self.result
 
-    async def _fetch(self) -> dict:
+    async def fetch_tags(self) -> dict:
         """Fetcher function.
         
         Queries the database for caching,
@@ -76,7 +79,6 @@ class TagFetcher:
         self.cur.execute('select type from tags where tag=?', (self.tag,))
         result = self.cur.fetchone()
         if result:
-            log.debug(f'got {self.tag} from tag knowledge')
             return {
                 'name': self.tag,
                 'tag_type': result[0]
@@ -92,8 +94,9 @@ class TagFetcher:
             retry = round(random.uniform(0.5, 2.5), 3)
             log.info(f'[tagfetch {self.tag}] {err!r}, retrying in {retry}s.')
             await asyncio.sleep(retry)
-            return await self._fetch()
+            return await self.fetch_tags()
 
+        learned, already_in = 0, 0
         # this is a list of tag information, insert for each!
         for tag_data in results:
             tag_name = tag_data['name']
@@ -103,9 +106,12 @@ class TagFetcher:
             try:
                 self.cur.execute('insert into tags (tag, type) values (?, ?)',
                                  (tag_name, tag_type))
-                log.debug(f'learned {tag_name!r} => type {tag_type}')
+                learned += 1
             except sqlite3.IntegrityError:
-                log.debug(f'we already learned {tag_name!r}! ({self.tag!r})')
+                already_in += 1
+        
+        log.info(f'[tagfetch] learned {learned} tags,'
+                 f' {already_in} already learned')
 
         # reiterate again, to get our *actual tag* information
         for tag_data in results:
