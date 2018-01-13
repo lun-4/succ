@@ -135,7 +135,6 @@ class SuccMain:
                 tag_fetchers.append(tf)
 
             # actually fetch the tags
-            log.debug(f'waiting for {len(tag_fetchers)} tag fetchers')
             _coros = [tf.fetch() for tf in tag_fetchers]
             done, pending = await asyncio.wait(_coros)
             if pending:
@@ -154,7 +153,6 @@ class SuccMain:
                     if namespace:
                         post.tag_add(f'{namespace}{tag_name}')
 
-            log.debug(f'post {post.id} with {len(post.tags)} tags')
             posts.append(post)
             self.db.commit()
         t_end = time.monotonic()
