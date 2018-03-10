@@ -264,6 +264,17 @@ class SuccMain:
             i += page_continue + 1
             time.sleep(2)
 
+    def c_loop(self, args):
+        """Enter a loop fetching stuff."""
+        # first, build everything
+        # then, enter loop
+        # TODO: incremental fetching
+        while True:
+            print('starting...')
+            self.c_fetch_all(args)
+            print('waiting...')
+            time.sleep(300)
+
     def process_line(self, line):
         """Process a line as a command"""
         args = line.split(' ')
