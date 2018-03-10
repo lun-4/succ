@@ -10,10 +10,9 @@ a hypnohub api scraper
 
 this calls the api a lot of times
 in a sane matter, saving anything it can
-to a SQLite database.
+to a SQLite database (the tag knowledge db).
 
-It also exports itself to a Hydrus
-tag archive, so you can have your tagged porn
+It also exports itself to a Hydrus tag archive.
 
     ⣠⣦⣤⣀
 ⠀⠀⠀⠀⢡⣤⣿⣿

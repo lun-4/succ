@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 class SuccMain:
     """succ main class.
-    
+
     manages all operation of succ,
     from event loop, to download jobs,
     to shutdown, to everything.
@@ -33,6 +33,8 @@ class SuccMain:
 
         # create hydrus tag archive very early
         self.hta = HydrusTagArchive('succ-archive.db')
+
+        # hypnohub uses MD5, sadly
         self.hta.SetHashType(HASH_TYPE_MD5)
 
         self.loop = asyncio.get_event_loop()
@@ -60,10 +62,7 @@ class SuccMain:
             return await res.json()
 
     def init(self):
-        """Start the main stuff.
-        
-        Creating tables, etc
-        """
+        """Create tag knowledge db's tables."""
         log.info('initializing')
 
         self.db.executescript("""
@@ -76,6 +75,7 @@ class SuccMain:
         self._running = True
 
     def shutdown(self, code):
+        """Commit everything and shutdown the client."""
         if not self._running:
             log.warning('trying to shutdown twice.')
             return
@@ -107,6 +107,10 @@ class SuccMain:
         self.db.commit()
 
     async def fetch_page(self, page: int) -> list:
+        """Fetch a single page from the API.
+
+        Each page contains 200 posts.
+        """
         try:
             res = await self.hh_req(Route('GET', '/post/index.json?page'
                                                  f'={page}&limit=200'))
@@ -121,22 +125,29 @@ class SuccMain:
         for rawpost in res:
             post = Post(rawpost)
 
-            # lmfao
+            # add tags that aren't given by the API
+            # but they're nice to have anyways.
             post.tag_add('hypnosis')
             post.tag_add('booru:hypnohub')
 
-            # process namespaces
+            # add the id: and md5: namespace tags
             post.tag_add(f'md5:{post.hash}')
             post.tag_add(f'id:{post.id}')
 
+            # fetch (more) tag info for each post
+            # the API by itself doesn't give us a lot of information
+            # regarding each tag's type on the post.
+
+            # so we use the tag information route to fill us in with those
+            # tag's namespaces and whatnot.
             tag_fetchers = []
             for tag in copy.copy(post.raw_tags):
-                tf = TagFetcher(self, self.db.cursor(), tag)
-                tag_fetchers.append(tf)
+                tagf = TagFetcher(self, self.db.cursor(), tag)
+                tag_fetchers.append(tagf)
 
             # actually fetch the tags
             _coros = [tf.fetch() for tf in tag_fetchers]
-            done, pending = await asyncio.wait(_coros)
+            _, pending = await asyncio.wait(_coros)
             if pending:
                 log.warning(f'we have {len(pending)} pending tasks')
 
@@ -155,6 +166,7 @@ class SuccMain:
 
             posts.append(post)
             self.db.commit()
+
         t_end = time.monotonic()
         delta = round(t_end - t_start, 2)
 
@@ -206,11 +218,12 @@ class SuccMain:
         log.info(f'[tagarchive:{listid}] {len(posts)} posts, {delta}ms')
 
     def c_fetch_latest(self, args):
-        """fetch latest stuff from hypnohub"""
+        """fetch latest page."""
         posts = self.loop.run_until_complete(self.fetch_page(0))
         self.process_hta(posts, 'index')
 
     def c_fetch_pages(self, args):
+        """fetch a handful of pages."""
         start, end = int(args[1]), int(args[2])
         data = self.fetch_pages(start, end)
         self.process_hta(data, f'pages: {start} - {end}')
@@ -246,7 +259,7 @@ class SuccMain:
         self.process_hta(final_posts, f'from {first_id} to {until_id}')
 
     def c_fetch_all(self, args):
-        """fetch all from hypnohub. ALL."""
+        """fetch everything."""
         i = 0
         page_continue = 3
         while True:
@@ -288,5 +301,5 @@ class SuccMain:
             handler(args)
         except ShutdownClient as err:
             self.shutdown(err.args[0])
-        except:
+        except Exception:
             log.exception('error executing command')

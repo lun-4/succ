@@ -50,7 +50,7 @@ class TagFetcher:
 
     Fuck the Hypnohub API.
     """
-    def __init__(self, succ, cur, tag):
+    def __init__(self, succ, cur, tag: str):
         self.succ = succ
         self.cur = cur
         self.tag = tag
@@ -66,7 +66,7 @@ class TagFetcher:
 
     async def fetch_tags(self) -> dict:
         """Fetcher function.
-        
+
         Queries the database for caching,
         if we get invalidated we call the API.
 
@@ -84,12 +84,12 @@ class TagFetcher:
                 'tag_type': result[0]
             }
 
-        # we didn't get anything from cache, fuck the api
-        # no limit, i want to fuck more
-        r = Route('GET', '/tag/index.json?name='
-                         f'{self.tag}&limit=0')
+        # since our cache missed the current tag,
+        # we query from the API for it.
+        route = Route('GET', '/tag/index.json?name='
+                             f'{self.tag}&limit=0')
         try:
-            results = await self.succ.hh_req(r)
+            results = await self.succ.hh_req(route)
         except (aiohttp.ClientError, HHApiError) as err:
             retry = round(random.uniform(0.5, 2.5), 3)
             log.info(f'[tagfetch {self.tag}] {err!r}, retrying in {retry}s.')
@@ -97,7 +97,9 @@ class TagFetcher:
             return await self.fetch_tags()
 
         learned, already_in = 0, 0
-        # this is a list of tag information, insert for each!
+
+        # we get a list of tag information from a tag
+        # we can get 1 tag information or N tag information.
         for tag_data in results:
             tag_name = tag_data['name']
             tag_type = tag_data['tag_type']
@@ -109,7 +111,7 @@ class TagFetcher:
                 learned += 1
             except sqlite3.IntegrityError:
                 already_in += 1
-        
+
         log.info(f'[tagfetch] learned {learned} tags,'
                  f' {already_in} already learned')
 
@@ -121,12 +123,15 @@ class TagFetcher:
             if tag_name == self.tag:
                 return _wrap(tag_name, tag_type)
 
-        # this is like, when a tag is in hypnohub,
-        # but the tag api doesn't give us anything
-        # meaningful about it
+        # if we didn't find our tag inside those tag information data,
+        # mark it as a general tag
 
-        # default: make it general.
+        # this happens when the tag exists inside a post,
+        # but the tag information route doesn't give us
+        # anything meaningful about the tag.
         self.cur.execute('insert into tags (tag, type) values (?, ?)',
                          (self.tag, TagType.GENERAL))
-        log.debug(f'{self.tag!r} was a no-match from API')
+
+        log.debug(f'{self.tag!r} is a no-match from API')
+
         return _wrap(self.tag, TagType.GENERAL)
